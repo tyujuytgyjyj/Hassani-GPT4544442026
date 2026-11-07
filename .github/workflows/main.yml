@@ -22,7 +22,7 @@ jobs:
 
       - name: Create RDP User
         run: |
-          $password = "Rdp@1234"
+          $password = "Rdpfr@2010.1.."
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
