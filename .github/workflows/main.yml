@@ -1,4 +1,4 @@
-name: win 11 + tailscale + Download.bat script 
+name: win 11 + tailscale + no-pass + 1080p
 
 on:
   workflow_dispatch:
@@ -9,125 +9,88 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Configure Core RDP Settings + Blank Password Policy
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
+          # Enable RDP and disable NLA + SecurityLayer
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
 
-          # Remove any existing rule with the same name to avoid duplication
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-         
-          # For testing, allow any incoming connection on port 3389
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
+          # Allow blank passwords for network logons (RDP)
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          # Firewall rule
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Fixed Password
+      - name: Create RDP User with EMPTY Password
         run: |
-          $password = "2010.1.."
+          $password = ""   # فاضي زي مخك
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+
+          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
+            Remove-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
           }
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-         
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-         
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
+
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+
+          # Force empty password again just in case
+          net user RDP ""
+
+          echo "RDP_CREDS=User: RDP | Password: (empty)" >> $env:GITHUB_ENV
+
+      - name: Force 1920x1080 Display Settings
+        run: |
+          # محاولة فرض الريزولوشن عبر الريجستري (محدود على الرنر الهيدلس)
+          $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Video"
+          # إعدادات عرض عامة
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarDa" -Value 0 -Force -ErrorAction SilentlyContinue
+
+          # الأفضل تسوي الريزولوشن من كلاينت الـ RDP حقك (mRemoteNG أو Windows RDP):
+          # Display → 1920 x 1080
+          Write-Host "Client-side resolution recommended: 1920x1080"
 
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-         
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
         run: |
-          # Bring up Tailscale with the provided auth key and set a unique hostname
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-         
-          # Wait for Tailscale to assign an IP
+
           $tsIP = $null
           $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
+          while (-not $tsIP -and $retries -lt 12) {
+            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+            Start-Sleep -Seconds 5
+            $retries++
           }
-         
+
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
+            Write-Error "Tailscale IP not assigned"
+            exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-     
-      - name: Verify RDP Accessibility
-        run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-         
-          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
-              exit 1
-          }
-          Write-Host "TCP connectivity successful!"
 
-      - name: Maintain Connection + Watch RDP User
+      - name: Verify + Keep Alive
         run: |
-          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "`n=== RDP ACCESS (NO PASSWORD) ==="
           Write-Host "Address: $env:TAILSCALE_IP"
           Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "Password: (leave empty)"
+          Write-Host "Resolution: set 1920x1080 on your RDP client"
           Write-Host "==================`n"
 
-          $rdpProfile = "C:\Users\RDP"
-          $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
-          $downloadUrl = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
-          $downloadPath = "$startupPath\Downloads.bat"
-
+          # Keep alive
           while ($true) {
-              if (Test-Path $rdpProfile) {
-                  try {
-                      if (-not (Test-Path $startupPath)) {
-                          New-Item -ItemType Directory -Path $startupPath -Force | Out-Null
-                      }
-
-                      Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
-                      Write-Host "? Downloads.bat copied to $downloadPath"
-
-                      # Run the batch file for the first time
-                      cmd /c $downloadPath
-                      Write-Host "? Downloads.bat executed successfully"
-                      break
-                  }
-                  catch {
-                      Write-Host "? Error copying or executing Downloads.bat: $($_.Exception.Message)"
-                      break
-                  }
-              }
-              else {
-                  Write-Host "[$(Get-Date)] Waiting for RDP profile to be created..."
-                  Start-Sleep -Seconds 30
-              }
-          }
-
-          # Keep runner alive
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-              Start-Sleep -Seconds 300
+            Write-Host "[$(Get-Date)] Still alive, go fuck yourself"
+            Start-Sleep -Seconds 300
           }
