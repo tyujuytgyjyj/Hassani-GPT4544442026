@@ -27,10 +27,14 @@ jobs:
             Remove-LocalUser -Name "RDP" -Confirm:$false
           }
 
-          New-LocalUser -Name "RDP" -NoPassword -AccountNeverExpires -PasswordNeverExpires
+          New-LocalUser -Name "RDP" -NoPassword -AccountNeverExpires
+          Set-LocalUser -Name "RDP" -PasswordNeverExpires $true
+
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+
           net user RDP ""
+          net user RDP /passwordchg:no
 
           Write-Host "User RDP created with blank password"
 
@@ -54,7 +58,7 @@ jobs:
           }
 
           if (-not $tsIP) {
-            Write-Error "فشل تايلسكيل"
+            Write-Error "فشل تايلسكيل في الحصول على IP"
             exit 1
           }
 
@@ -67,7 +71,7 @@ jobs:
           Write-Host "========================================"
           Write-Host "Address  : $env:TAILSCALE_IP"
           Write-Host "Username : RDP"
-          Write-Host "Password : (فارغ - اضغط Enter)"
+          Write-Host "Password : (فارغ - اضغط Enter فقط)"
           Write-Host "========================================"
           Write-Host ""
 
