@@ -1,4 +1,4 @@
-name: win11-tailscale-no-password-1080p
+name: win11-no-password-rdp
 
 on:
   workflow_dispatch:
@@ -11,15 +11,11 @@ jobs:
     steps:
       - name: Enable RDP + Allow Blank Passwords
         run: |
-          # فتح الـ RDP وتعطيل NLA
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 0 -Force
-
-          # السماح بالباسوورد الفاضي على الشبكة (مهم جداً)
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-          # فتح البورت في الفايروول
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
@@ -27,22 +23,15 @@ jobs:
 
       - name: Create RDP User (No Password)
         run: |
-          # امسح اليوزر لو موجود من قبل
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
             Remove-LocalUser -Name "RDP" -Confirm:$false
           }
 
-          # أنشئ يوزر بدون أي باسوورد
           New-LocalUser -Name "RDP" -NoPassword -AccountNeverExpires -PasswordNeverExpires
-
-          # أضفه للجروبات
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
-
-          # تأكيد إن الباسوورد فاضي
           net user RDP ""
 
-          echo "RDP_USER=RDP" >> $env:GITHUB_ENV
           Write-Host "User RDP created with blank password"
 
       - name: Install Tailscale
@@ -65,28 +54,24 @@ jobs:
           }
 
           if (-not $tsIP) {
-            Write-Error "فشل تايلسكيل في الحصول على IP"
+            Write-Error "فشل تايلسكيل"
             exit 1
           }
 
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
           Write-Host "Tailscale IP: $tsIP"
 
-      - name: Show Connection Info + Keep Alive
+      - name: Show Info + Keep Alive
         run: |
           Write-Host ""
-          Write-Host "=============================================="
-          Write-Host "           RDP جاهز - بدون باسوورد"
-          Write-Host "=============================================="
-          Write-Host "Address   : $env:TAILSCALE_IP"
-          Write-Host "Username  : RDP"
-          Write-Host "Password  : (اتركه فاضي واضغط Enter)"
-          Write-Host "Resolution: حطه 1920x1080 من برنامج الـ RDP عندك"
-          Write-Host "=============================================="
+          Write-Host "========================================"
+          Write-Host "Address  : $env:TAILSCALE_IP"
+          Write-Host "Username : RDP"
+          Write-Host "Password : (فارغ - اضغط Enter)"
+          Write-Host "========================================"
           Write-Host ""
 
-          # يخلي الرنر شغال
           while ($true) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] لسه شغال..."
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] لسه شغال"
             Start-Sleep -Seconds 300
           }
