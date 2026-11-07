@@ -20,9 +20,9 @@ jobs:
 
           Restart-Service TermService -Force
 
-      - name: Create RDP User (Simple Password)
+      - name: Create RDP User
         run: |
-          $password = "1234"
+          $password = "Rdp@1234"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
@@ -33,7 +33,7 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-          Write-Host "User RDP created with password: 1234"
+          Write-Host "User RDP created"
 
       - name: Install Tailscale
         run: |
@@ -68,7 +68,7 @@ jobs:
           Write-Host "========================================"
           Write-Host "Address  : $env:TAILSCALE_IP"
           Write-Host "Username : RDP"
-          Write-Host "Password : 1234"
+          Write-Host "Password : Rdp@1234"
           Write-Host "========================================"
           Write-Host ""
 
