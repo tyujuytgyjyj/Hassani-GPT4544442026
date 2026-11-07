@@ -1,4 +1,4 @@
-name: win11-no-password-rdp
+name: win11-simple-password-rdp
 
 on:
   workflow_dispatch:
@@ -9,47 +9,31 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Enable RDP + Disable Password Policy
+      - name: Enable RDP
         run: |
-          # فتح الـ RDP
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-          # تعطيل تعقيد كلمة المرور والطول الأدنى
-          secedit /export /cfg C:\secpol.cfg
-          (Get-Content C:\secpol.cfg) `
-            -replace "PasswordComplexity = 1", "PasswordComplexity = 0" `
-            -replace "MinimumPasswordLength = \d+", "MinimumPasswordLength = 0" `
-            -replace "PasswordHistorySize = \d+", "PasswordHistorySize = 0" | 
-            Set-Content C:\secpol.cfg
-          secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item C:\secpol.cfg -Force -ErrorAction SilentlyContinue
-
-          # فايروول
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
           Restart-Service TermService -Force
 
-      - name: Create RDP User (Blank Password)
+      - name: Create RDP User (Simple Password)
         run: |
+          $password = "1234"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
             Remove-LocalUser -Name "RDP" -Confirm:$false
           }
 
-          New-LocalUser -Name "RDP" -NoPassword -AccountNeverExpires
-          Set-LocalUser -Name "RDP" -PasswordNeverExpires $true
-
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-          # محاولة تفريغ الباسوورد
-          net user RDP "" 2>$null
-          net user RDP /passwordchg:no 2>$null
-
-          Write-Host "User RDP created"
+          Write-Host "User RDP created with password: 1234"
 
       - name: Install Tailscale
         run: |
@@ -84,7 +68,7 @@ jobs:
           Write-Host "========================================"
           Write-Host "Address  : $env:TAILSCALE_IP"
           Write-Host "Username : RDP"
-          Write-Host "Password : (فارغ - اضغط Enter)"
+          Write-Host "Password : 1234"
           Write-Host "========================================"
           Write-Host ""
 
