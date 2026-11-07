@@ -1,96 +1,92 @@
-name: win 11 + tailscale + no-pass + 1080p
+name: win11-tailscale-no-password-1080p
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  rdp:
     runs-on: windows-2025-vs2026
     timeout-minutes: 350
 
     steps:
-      - name: Configure Core RDP Settings + Blank Password Policy
+      - name: Enable RDP + Allow Blank Passwords
         run: |
-          # Enable RDP and disable NLA + SecurityLayer
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          # فتح الـ RDP وتعطيل NLA
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 0 -Force
 
-          # Allow blank passwords for network logons (RDP)
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
+          # السماح بالباسوورد الفاضي على الشبكة (مهم جداً)
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-          # Firewall rule
+          # فتح البورت في الفايروول
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
-          Restart-Service -Name TermService -Force
+          Restart-Service TermService -Force
 
-      - name: Create RDP User with EMPTY Password
+      - name: Create RDP User (No Password)
         run: |
-          $password = ""   # فاضي زي مخك
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-
+          # امسح اليوزر لو موجود من قبل
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-            Remove-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
+            Remove-LocalUser -Name "RDP" -Confirm:$false
           }
 
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+          # أنشئ يوزر بدون أي باسوورد
+          New-LocalUser -Name "RDP" -NoPassword -AccountNeverExpires -PasswordNeverExpires
+
+          # أضفه للجروبات
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-          # Force empty password again just in case
+          # تأكيد إن الباسوورد فاضي
           net user RDP ""
 
-          echo "RDP_CREDS=User: RDP | Password: (empty)" >> $env:GITHUB_ENV
-
-      - name: Force 1920x1080 Display Settings
-        run: |
-          # محاولة فرض الريزولوشن عبر الريجستري (محدود على الرنر الهيدلس)
-          $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Video"
-          # إعدادات عرض عامة
-          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarDa" -Value 0 -Force -ErrorAction SilentlyContinue
-
-          # الأفضل تسوي الريزولوشن من كلاينت الـ RDP حقك (mRemoteNG أو Windows RDP):
-          # Display → 1920 x 1080
-          Write-Host "Client-side resolution recommended: 1920x1080"
+          echo "RDP_USER=RDP" >> $env:GITHUB_ENV
+          Write-Host "User RDP created with blank password"
 
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
+          Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
-      - name: Establish Tailscale Connection
+      - name: Connect Tailscale
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-rdp-$env:GITHUB_RUN_ID --accept-dns=false
 
           $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 12) {
-            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-            Start-Sleep -Seconds 5
-            $retries++
+          for ($i = 1; $i -le 15; $i++) {
+            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null
+            if ($tsIP) { break }
+            Start-Sleep -Seconds 4
           }
 
           if (-not $tsIP) {
-            Write-Error "Tailscale IP not assigned"
+            Write-Error "فشل تايلسكيل في الحصول على IP"
             exit 1
           }
+
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          Write-Host "Tailscale IP: $tsIP"
 
-      - name: Verify + Keep Alive
+      - name: Show Connection Info + Keep Alive
         run: |
-          Write-Host "`n=== RDP ACCESS (NO PASSWORD) ==="
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: (leave empty)"
-          Write-Host "Resolution: set 1920x1080 on your RDP client"
-          Write-Host "==================`n"
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "           RDP جاهز - بدون باسوورد"
+          Write-Host "=============================================="
+          Write-Host "Address   : $env:TAILSCALE_IP"
+          Write-Host "Username  : RDP"
+          Write-Host "Password  : (اتركه فاضي واضغط Enter)"
+          Write-Host "Resolution: حطه 1920x1080 من برنامج الـ RDP عندك"
+          Write-Host "=============================================="
+          Write-Host ""
 
-          # Keep alive
+          # يخلي الرنر شغال
           while ($true) {
-            Write-Host "[$(Get-Date)] Still alive, go fuck yourself"
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] لسه شغال..."
             Start-Sleep -Seconds 300
           }
